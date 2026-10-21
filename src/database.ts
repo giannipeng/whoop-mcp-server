@@ -37,8 +37,20 @@ export class WhoopDatabase {
 	constructor(dbPath = './whoop.db') {
 		this.db = new Database(dbPath);
 		this.db.pragma('journal_mode = WAL');
+		this.dropLegacyWorkouts();
 		this.initSchema();
 		this.runMigrations();
+	}
+
+	// Whoop v2 liefert Workouts ohne sport_id. Alte Datenbanken haben die Spalte
+	// als NOT NULL und lassen sich von SQLite nicht nachtraeglich lockern.
+	// workouts ist reiner Cache und fuellt sich beim naechsten Sync neu.
+	private dropLegacyWorkouts(): void {
+		const cols = this.db.prepare("PRAGMA table_info(workouts)").all() as { name: string; notnull: number }[];
+		const sportId = cols.find(c => c.name === 'sport_id');
+		if (sportId && sportId.notnull === 1) {
+			this.db.exec('DROP TABLE workouts');
+		}
 	}
 
 	private initSchema(): void {
@@ -116,7 +128,7 @@ export class WhoopDatabase {
 			CREATE TABLE IF NOT EXISTS workouts (
 				id TEXT PRIMARY KEY,
 				user_id INTEGER NOT NULL,
-				sport_id INTEGER NOT NULL,
+				sport_id INTEGER,
 				sport_name TEXT,
 				start_time TEXT NOT NULL,
 				end_time TEXT NOT NULL,
@@ -393,7 +405,7 @@ export class WhoopDatabase {
 				stmt.run(
 					w.id,
 					w.user_id,
-					w.sport_id,
+					w.sport_id ?? null,
 					w.sport_name ?? null,
 					w.start,
 					w.end,
